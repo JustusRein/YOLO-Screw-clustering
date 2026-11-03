@@ -1,0 +1,12 @@
+services:
+  screw-dataset-generator:
+    build: .
+    image: screw-step-yolo-generator:blender-4.5
+    volumes:
+      - ./input:/data/input:ro
+      - ./output:/data/output
+    environment:
+      IMAGES_PER_STEP: "30"
+      RES_X: "640"
+      RES_Y: "640"
+      STEP_DEFLECTION: "0.025"
