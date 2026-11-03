@@ -2,3 +2,4 @@ input
 output
 .git
 __pycache__
+*.zip

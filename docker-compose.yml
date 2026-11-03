@@ -6,7 +6,13 @@ services:
       - ./input:/data/input:ro
       - ./output:/data/output
     environment:
+      INPUT_DIR: /data/input
+      OUTPUT_DIR: /data/output
+      METADATA_CSV: /data/input/screw_metadata.csv
       IMAGES_PER_STEP: "30"
       RES_X: "640"
       RES_Y: "640"
       STEP_DEFLECTION: "0.025"
+      RANDOM_SEED: "42"
+      TRAIN_RATIO: "0.70"
+      VAL_RATIO: "0.20"
