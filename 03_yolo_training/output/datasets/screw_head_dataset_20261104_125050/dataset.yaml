@@ -1,0 +1,7 @@
+path: /workspace/output/datasets/screw_head_dataset_20261104_125050
+train: images/train
+val: images/val
+names:
+  0: "countersunk"
+  1: "cylinder_head"
+  2: "hex_head"

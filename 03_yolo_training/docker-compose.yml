@@ -1,0 +1,47 @@
+
+services:
+  yolo-trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: yolo-screw-trainer
+
+    working_dir: /workspace
+
+    volumes:
+      # Direct access to generated images and labels
+      - ../02_image_generation/output:/data/source:ro
+
+      # Training scripts
+      - ./scripts:/workspace/scripts:ro
+
+      # Training datasets and model outputs
+      - ./output:/workspace/output
+
+      # Optional images for prediction
+      - ./input/predict:/data/predict:ro
+
+    environment:
+      SOURCE_DIR: /data/source
+      OUTPUT_DIR: /workspace/output
+
+      MODEL: yolo11n.pt
+
+      EPOCHS: "100"
+      IMAGE_SIZE: "640"
+      BATCH_SIZE: "8"
+      WORKERS: "4"
+
+      LEARNING_RATE: "0.001"
+      PATIENCE: "30"
+      RANDOM_SEED: "42"
+
+      # CPU is used by default.
+      # For a GPU setup, configure the Docker NVIDIA runtime separately.
+
+    shm_size: "4gb"
+
+    command:
+      - python
+      - /workspace/scripts/train.py

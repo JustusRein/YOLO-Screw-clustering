@@ -1,0 +1,17 @@
+{
+    "source_dataset": "/data/source/screw_dataset_20261104_123341",
+    "classes": [
+        "countersunk",
+        "cylinder_head",
+        "hex_head"
+    ],
+    "images": {
+        "train": 15,
+        "val": 10,
+        "test": 0
+    },
+    "total_images": 25,
+    "validation_available": true,
+    "test_available": false,
+    "split_strategy": "source_model"
+}
