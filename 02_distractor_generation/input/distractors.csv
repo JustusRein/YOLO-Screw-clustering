@@ -1,0 +1,10 @@
+id,part_type,variants,outer_diameter_mm,inner_diameter_mm,length_mm,width_mm,height_mm,thickness_mm,teeth,variation_percent
+001,washer,30,20,6,,,,2,,10
+002,spacer,30,15,6,,,,10,,15
+003,pin,25,8,,30,,,,,15
+004,shaft,25,12,,60,,,,,20
+005,bushing,25,20,10,,,,25,,15
+006,collar,20,25,12,15,,,,4,,15
+007,bearing,20,22,8,,,,7,,10
+008,gear,25,40,,,,,8,24,10
+009,bracket,20,,,50,40,30,4,,15

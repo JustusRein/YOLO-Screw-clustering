@@ -1,0 +1,63 @@
+
+services:
+  yolo-trainer:
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: yolo-screw-trainer
+
+    working_dir: /workspace
+
+    volumes:
+      - ../03_image_generation/output:/data/source:ro
+      - ./scripts:/workspace/scripts:ro
+      - ./output:/workspace/output
+      - ./input/predict:/data/predict:ro
+
+    environment:
+
+      SOURCE_DIR: /data/source
+      OUTPUT_DIR: /workspace/output
+
+      PREDICT_DIR: /data/predict
+
+      WEIGHTS: /workspace/output/weights/best.pt
+
+      MODEL: yolo11n.pt
+
+      EPOCHS: "100"
+
+      # Intel RealSense D405 RGB resolution
+      IMAGE_SIZE: "1280"
+      RES_X: "1280"
+      RES_Y: "720"
+
+      # Preserve 16:9 aspect ratio during training
+      RECTANGULAR_TRAINING: "true"
+
+      BATCH_SIZE: "2"
+
+      WORKERS: "2"
+
+      LEARNING_RATE: "0.001"
+
+      PATIENCE: "30"
+
+      RANDOM_SEED: "42"
+
+      DEVICE: cpu
+
+      EXPECTED_WIDTH: "1280"
+      EXPECTED_HEIGHT: "720"
+
+      # Prediction settings
+      CONFIDENCE: "0.25"
+      IOU_THRESHOLD: "0.45"
+
+    shm_size: "4gb"
+
+    command:
+      - python
+      - /workspace/scripts/train.py

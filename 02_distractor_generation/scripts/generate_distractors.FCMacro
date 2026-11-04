@@ -1,0 +1,828 @@
+import FreeCAD as App
+import Part
+import Mesh
+import Import
+
+import os
+import csv
+import math
+import random
+import traceback
+
+from FreeCAD import Vector
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+INPUT_CSV = os.environ.get(
+    "INPUT_CSV",
+    "/data/input/distractors.csv"
+)
+
+OUTPUT_DIR = os.environ.get(
+    "OUTPUT_DIR",
+    "/data/output"
+)
+
+STL_DIR = os.path.join(OUTPUT_DIR, "stl")
+STEP_DIR = os.path.join(OUTPUT_DIR, "step")
+FCSTD_DIR = os.path.join(OUTPUT_DIR, "fcstd")
+
+REPORT_FILE = os.path.join(
+    OUTPUT_DIR,
+    "generation_report.csv"
+)
+
+RANDOM_SEED = int(
+    os.environ.get("RANDOM_SEED", "42")
+)
+
+EXPORT_STEP = os.environ.get(
+    "EXPORT_STEP", "1"
+) == "1"
+
+EXPORT_FCSTD = os.environ.get(
+    "EXPORT_FCSTD", "0"
+) == "1"
+
+
+random.seed(RANDOM_SEED)
+
+
+# ============================================================
+# INITIALIZATION
+# ============================================================
+
+for directory in [
+    OUTPUT_DIR,
+    STL_DIR,
+    STEP_DIR,
+    FCSTD_DIR
+]:
+    os.makedirs(directory, exist_ok=True)
+
+
+def log(message):
+    print(
+        "[DISTRACTOR-GENERATOR] " + str(message),
+        flush=True
+    )
+
+
+# ============================================================
+# CSV
+# ============================================================
+
+REQUIRED_COLUMNS = [
+    "id",
+    "part_type",
+    "variants",
+    "outer_diameter_mm",
+    "inner_diameter_mm",
+    "length_mm",
+    "width_mm",
+    "height_mm",
+    "thickness_mm",
+    "teeth",
+    "variation_percent"
+]
+
+
+def read_input():
+
+    if not os.path.exists(INPUT_CSV):
+        raise FileNotFoundError(INPUT_CSV)
+
+    with open(
+        INPUT_CSV,
+        "r",
+        encoding="utf-8-sig",
+        newline=""
+    ) as file:
+
+        reader = csv.DictReader(file)
+
+        missing = (
+            set(REQUIRED_COLUMNS)
+            - set(reader.fieldnames or [])
+        )
+
+        if missing:
+            raise ValueError(
+                "Missing CSV columns: {}".format(
+                    sorted(missing)
+                )
+            )
+
+        return list(reader)
+
+
+def number(row, key, default=0.0):
+
+    value = row.get(key, "")
+
+    if value is None or str(value).strip() == "":
+        return float(default)
+
+    return float(value)
+
+
+def varied(value, variation_percent):
+
+    value = float(value)
+
+    if value <= 0:
+        return value
+
+    factor = variation_percent / 100.0
+
+    multiplier = random.uniform(
+        1.0 - factor,
+        1.0 + factor
+    )
+
+    return max(0.1, value * multiplier)
+
+
+def clean_name(value):
+
+    allowed = (
+        "abcdefghijklmnopqrstuvwxyz"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789_-"
+    )
+
+    result = "".join(
+        char if char in allowed else "_"
+        for char in str(value)
+    )
+
+    return result.strip("_")
+
+
+# ============================================================
+# GEOMETRY HELPERS
+# ============================================================
+
+def make_ring(
+    outer_diameter,
+    inner_diameter,
+    height
+):
+
+    if outer_diameter <= inner_diameter:
+        raise ValueError(
+            "Outer diameter must be larger than inner diameter."
+        )
+
+    if inner_diameter <= 0 or height <= 0:
+        raise ValueError(
+            "Inner diameter and height must be positive."
+        )
+
+    outer = Part.makeCylinder(
+        outer_diameter / 2.0,
+        height
+    )
+
+    inner = Part.makeCylinder(
+        inner_diameter / 2.0,
+        height
+    )
+
+    return outer.cut(inner)
+
+
+# ============================================================
+# PART GENERATORS
+# ============================================================
+
+def create_washer(p):
+
+    return make_ring(
+        p["outer_diameter"],
+        p["inner_diameter"],
+        p["thickness"]
+    )
+
+
+def create_spacer(p):
+
+    return make_ring(
+        p["outer_diameter"],
+        p["inner_diameter"],
+        p["length"]
+    )
+
+
+def create_pin(p):
+
+    return Part.makeCylinder(
+        p["outer_diameter"] / 2.0,
+        p["length"]
+    )
+
+
+def create_shaft(p):
+
+    shape = Part.makeCylinder(
+        p["outer_diameter"] / 2.0,
+        p["length"]
+    )
+
+    # Small chamfers on both ends
+    chamfer_size = min(
+        p["outer_diameter"] * 0.05,
+        p["length"] * 0.05
+    )
+
+    if chamfer_size > 0:
+        try:
+            edges = shape.Edges
+            shape = shape.makeChamfer(
+                chamfer_size,
+                edges
+            )
+        except Exception:
+            pass
+
+    return shape
+
+
+def create_bushing(p):
+
+    return make_ring(
+        p["outer_diameter"],
+        p["inner_diameter"],
+        p["length"]
+    )
+
+
+def create_collar(p):
+
+    body_length = p["length"]
+    flange_length = max(
+        p["thickness"],
+        body_length * 0.2
+    )
+
+    body = make_ring(
+        p["outer_diameter"],
+        p["inner_diameter"],
+        body_length
+    )
+
+    flange_outer = Part.makeCylinder(
+        p["outer_diameter"] * 0.65,
+        flange_length
+    )
+
+    flange_inner = Part.makeCylinder(
+        p["inner_diameter"] / 2.0,
+        flange_length
+    )
+
+    flange = flange_outer.cut(flange_inner)
+
+    flange.translate(
+        Vector(0, 0, body_length)
+    )
+
+    return body.fuse(flange)
+
+
+def create_bearing(p):
+
+    outer_d = p["outer_diameter"]
+    inner_d = p["inner_diameter"]
+    width = p["thickness"]
+
+    if outer_d <= inner_d:
+        raise ValueError(
+            "Bearing outer diameter must exceed inner diameter."
+        )
+
+    radial_space = (
+        outer_d - inner_d
+    ) / 2.0
+
+    ball_radius = radial_space * 0.22
+
+    if ball_radius <= 0:
+        raise ValueError(
+            "Invalid bearing dimensions."
+        )
+
+    outer_ring = make_ring(
+        outer_d,
+        outer_d - radial_space * 0.55,
+        width
+    )
+
+    inner_ring = make_ring(
+        inner_d + radial_space * 0.55,
+        inner_d,
+        width
+    )
+
+    ball_count = 8
+
+    pitch_radius = (
+        outer_d + inner_d
+    ) / 4.0
+
+    balls = []
+
+    for index in range(ball_count):
+
+        angle = (
+            2.0 * math.pi
+            * index
+            / ball_count
+        )
+
+        x = pitch_radius * math.cos(angle)
+        y = pitch_radius * math.sin(angle)
+
+        ball = Part.makeSphere(
+            ball_radius,
+            Vector(
+                x,
+                y,
+                width / 2.0
+            )
+        )
+
+        balls.append(ball)
+
+    return Part.makeCompound(
+        [outer_ring, inner_ring] + balls
+    )
+
+
+def create_gear(p):
+
+    outer_d = p["outer_diameter"]
+    thickness = p["thickness"]
+    teeth = int(p["teeth"])
+
+    if teeth < 6:
+        raise ValueError(
+            "Gear needs at least 6 teeth."
+        )
+
+    if outer_d <= 0 or thickness <= 0:
+        raise ValueError(
+            "Invalid gear dimensions."
+        )
+
+    outer_radius = outer_d / 2.0
+    root_radius = outer_radius * 0.82
+
+    points = []
+
+    # Four points per tooth:
+    # root -> tip -> tip -> root
+    for tooth in range(teeth):
+
+        base_angle = (
+            2.0 * math.pi
+            * tooth
+            / teeth
+        )
+
+        tooth_points = [
+            (root_radius, base_angle),
+            (
+                outer_radius,
+                base_angle + 0.20 * 2.0 * math.pi / teeth
+            ),
+            (
+                outer_radius,
+                base_angle + 0.55 * 2.0 * math.pi / teeth
+            ),
+            (
+                root_radius,
+                base_angle + 0.80 * 2.0 * math.pi / teeth
+            )
+        ]
+
+        for radius, angle in tooth_points:
+
+            points.append(
+                Vector(
+                    radius * math.cos(angle),
+                    radius * math.sin(angle),
+                    0
+                )
+            )
+
+    points.append(points[0])
+
+    wire = Part.makePolygon(points)
+    face = Part.Face(wire)
+
+    gear = face.extrude(
+        Vector(0, 0, thickness)
+    )
+
+    # Central bore
+    bore_diameter = outer_d * 0.25
+
+    bore = Part.makeCylinder(
+        bore_diameter / 2.0,
+        thickness
+    )
+
+    return gear.cut(bore)
+
+
+def create_bracket(p):
+
+    width = p["width"]
+    length = p["length"]
+    height = p["height"]
+    thickness = p["thickness"]
+
+    if thickness >= min(width, length, height):
+        raise ValueError(
+            "Bracket thickness is too large."
+        )
+
+    horizontal = Part.makeBox(
+        length,
+        width,
+        thickness
+    )
+
+    vertical = Part.makeBox(
+        length,
+        thickness,
+        height
+    )
+
+    vertical.translate(
+        Vector(
+            0,
+            0,
+            0
+        )
+    )
+
+    return horizontal.fuse(vertical)
+
+
+# ============================================================
+# PARAMETER GENERATION
+# ============================================================
+
+def create_parameters(row):
+
+    variation = number(
+        row,
+        "variation_percent",
+        10
+    )
+
+    p = {
+        "outer_diameter": varied(
+            number(row, "outer_diameter_mm"),
+            variation
+        ),
+
+        "inner_diameter": varied(
+            number(row, "inner_diameter_mm"),
+            variation
+        ),
+
+        "length": varied(
+            number(row, "length_mm"),
+            variation
+        ),
+
+        "width": varied(
+            number(row, "width_mm"),
+            variation
+        ),
+
+        "height": varied(
+            number(row, "height_mm"),
+            variation
+        ),
+
+        "thickness": varied(
+            number(row, "thickness_mm"),
+            variation
+        ),
+
+        "teeth": int(
+            number(row, "teeth", 0)
+        )
+    }
+
+    return p
+
+
+# ============================================================
+# GEOMETRY DISPATCH
+# ============================================================
+
+GENERATORS = {
+    "washer": create_washer,
+    "spacer": create_spacer,
+    "pin": create_pin,
+    "shaft": create_shaft,
+    "bushing": create_bushing,
+    "collar": create_collar,
+    "bearing": create_bearing,
+    "gear": create_gear,
+    "bracket": create_bracket
+}
+
+
+# ============================================================
+# EXPORT
+# ============================================================
+
+def export_model(
+    doc,
+    obj,
+    category,
+    filename
+):
+
+    category_stl_dir = os.path.join(
+        STL_DIR,
+        category
+    )
+
+    category_step_dir = os.path.join(
+        STEP_DIR,
+        category
+    )
+
+    category_fcstd_dir = os.path.join(
+        FCSTD_DIR,
+        category
+    )
+
+    os.makedirs(
+        category_stl_dir,
+        exist_ok=True
+    )
+
+    os.makedirs(
+        category_step_dir,
+        exist_ok=True
+    )
+
+    os.makedirs(
+        category_fcstd_dir,
+        exist_ok=True
+    )
+
+    stl_path = os.path.join(
+        category_stl_dir,
+        filename + ".stl"
+    )
+
+    Mesh.export(
+        [obj],
+        stl_path
+    )
+
+    step_path = ""
+
+    if EXPORT_STEP:
+
+        step_path = os.path.join(
+            category_step_dir,
+            filename + ".step"
+        )
+
+        Import.export(
+            [obj],
+            step_path
+        )
+
+    fcstd_path = ""
+
+    if EXPORT_FCSTD:
+
+        fcstd_path = os.path.join(
+            category_fcstd_dir,
+            filename + ".FCStd"
+        )
+
+        doc.recompute()
+        doc.saveAs(fcstd_path)
+
+    return {
+        "stl_path": stl_path,
+        "step_path": step_path,
+        "fcstd_path": fcstd_path
+    }
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    rows = read_input()
+
+    report = []
+
+    total_requested = sum(
+        int(number(row, "variants", 1))
+        for row in rows
+    )
+
+    generated = 0
+    failed = 0
+
+    log("Families: {}".format(len(rows)))
+    log("Requested models: {}".format(total_requested))
+
+    for family_index, row in enumerate(rows):
+
+        category = clean_name(
+            row["part_type"].strip().lower()
+        )
+
+        if category not in GENERATORS:
+
+            log(
+                "Skipping unknown type: {}".format(
+                    category
+                )
+            )
+
+            continue
+
+        variants = int(
+            number(row, "variants", 1)
+        )
+
+        if variants < 1:
+            continue
+
+        log(
+            "Family {}/{}: {} ({} variants)".format(
+                family_index + 1,
+                len(rows),
+                category,
+                variants
+            )
+        )
+
+        for variant_index in range(variants):
+
+            model_id = clean_name(
+                row["id"]
+            )
+
+            filename = (
+                "{}_{}_v{:04d}".format(
+                    model_id,
+                    category,
+                    variant_index + 1
+                )
+            )
+
+            doc_name = clean_name(
+                "Distractor_" + filename
+            )
+
+            doc = None
+
+            try:
+
+                parameters = create_parameters(row)
+
+                shape = GENERATORS[category](
+                    parameters
+                )
+
+                if shape is None or shape.isNull():
+                    raise RuntimeError(
+                        "Generated shape is empty."
+                    )
+
+                if not shape.isValid():
+                    raise RuntimeError(
+                        "Generated shape is invalid."
+                    )
+
+                doc = App.newDocument(doc_name)
+
+                obj = doc.addObject(
+                    "Part::Feature",
+                    "Distractor"
+                )
+
+                obj.Label = filename
+                obj.Shape = shape
+
+                doc.recompute()
+
+                paths = export_model(
+                    doc,
+                    obj,
+                    category,
+                    filename
+                )
+
+                report.append({
+                    "id": filename,
+                    "category": category,
+                    "stl_file": os.path.basename(
+                        paths["stl_path"]
+                    ),
+                    "step_file": os.path.basename(
+                        paths["step_path"]
+                    ) if paths["step_path"] else "",
+                    "status": "success",
+                    "error": ""
+                })
+
+                generated += 1
+
+                log(
+                    "Generated: {}".format(filename)
+                )
+
+            except Exception as error:
+
+                failed += 1
+
+                report.append({
+                    "id": filename,
+                    "category": category,
+                    "stl_file": "",
+                    "step_file": "",
+                    "status": "failed",
+                    "error": str(error)
+                })
+
+                log(
+                    "ERROR {}: {}".format(
+                        filename,
+                        error
+                    )
+                )
+
+                log(traceback.format_exc())
+
+            finally:
+
+                if doc is not None:
+
+                    try:
+                        App.closeDocument(
+                            doc.Name
+                        )
+                    except Exception:
+                        pass
+
+    # --------------------------------------------------------
+    # REPORT
+    # --------------------------------------------------------
+
+    with open(
+        REPORT_FILE,
+        "w",
+        encoding="utf-8",
+        newline=""
+    ) as file:
+
+        fieldnames = [
+            "id",
+            "category",
+            "stl_file",
+            "step_file",
+            "status",
+            "error"
+        ]
+
+        writer = csv.DictWriter(
+            file,
+            fieldnames=fieldnames
+        )
+
+        writer.writeheader()
+        writer.writerows(report)
+
+    log("------------------------------------------")
+    log("Generation finished")
+    log("Requested: {}".format(total_requested))
+    log("Generated: {}".format(generated))
+    log("Failed: {}".format(failed))
+    log("Report: {}".format(REPORT_FILE))
+    log("------------------------------------------")
+
+
+main()

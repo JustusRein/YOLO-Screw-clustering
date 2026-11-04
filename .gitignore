@@ -1,6 +1,126 @@
-# Generated image datasets
-02_image_generation/output/
+# ============================================================
+# GENERATED DATASETS
+# ============================================================
 
-# Python cache
+# Generated images
+**/images/
+**/backgrounds/
+**/renders/
+**/rendered_images/
+
+# Image files
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.tif
+**/*.tiff
+**/*.bmp
+**/*.webp
+
+# ============================================================
+# 3D MODELS AND CAD FILES
+# ============================================================
+
+# STL
+**/*.stl
+
+# STEP / STP
+**/*.step
+**/*.stp
+
+# Other CAD formats
+**/*.obj
+**/*.fbx
+**/*.3mf
+**/*.3ds
+**/*.blend
+**/*.iges
+**/*.igs
+**/*.gltf
+**/*.glb
+
+# Point clouds
+**/*.ply
+**/*.pcd
+**/*.xyz
+**/*.las
+**/*.laz
+
+# ============================================================
+# GENERATED DATA AND ANNOTATIONS
+# ============================================================
+
+# Generated YOLO datasets
+**/datasets/
+**/multi_object_dataset_*/
+**/train/
+**/val/
+**/test/
+
+# Generated labels and metadata
+**/labels/
+**/metadata.csv
+**/input_errors.csv
+**/dataset_report.json
+
+# ============================================================
+# YOLO TRAINING OUTPUTS
+# ============================================================
+
+# Model weights
+**/*.pt
+**/*.pth
+**/*.onnx
+**/*.engine
+**/*.torchscript
+
+# Training runs and logs
+**/runs/
+**/weights/
+**/wandb/
+**/logs/
+
+# ============================================================
+# GENERATED OUTPUT DIRECTORIES
+# ============================================================
+
+# Generated CAD and image outputs
+**/output/
+**/outputs/
+**/generated/
+**/generated_models/
+
+# ============================================================
+# PYTHON
+# ============================================================
+
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# ============================================================
+# IDE AND OPERATING SYSTEM
+# ============================================================
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# TEMPORARY FILES
+# ============================================================
+
+*.tmp
+*.bak
+*.log
+*.swp
+*.swo
+~$*
