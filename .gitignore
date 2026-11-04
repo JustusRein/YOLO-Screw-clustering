@@ -1,0 +1,6 @@
+# Generated image datasets
+02_image_generation/output/
+
+# Python cache
+__pycache__/
+*.pyc
