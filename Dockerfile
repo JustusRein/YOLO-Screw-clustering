@@ -1,29 +1,56 @@
-FROM ubuntu:24.04
 
-ARG DEBIAN_FRONTEND=noninteractive
-ARG BLENDER_VERSION=4.5.0
-ENV BLENDER_DIR=/opt/blender-${BLENDER_VERSION}-linux-x64
-ENV PATH=${BLENDER_DIR}:${PATH}
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/opt
+FROM mambaorg/micromamba:2.3.2
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl xz-utils git libx11-6 libxi6 libxrender1 libxfixes3 \
-    libxkbcommon0 libsm6 libgl1 libglu1-mesa libgomp1 libegl1 libwayland-client0 \
+USER root
+
+RUN apt-get update && apt-get install -y \
+    git \
+    xvfb \
+    libgl1 \
+    libxrender1 \
+    libxext6 \
+    libxkbcommon-x11-0 \
+    libxcb-xinerama0 \
+    libxcb-cursor0 \
+    libglib2.0-0 \
+    libsm6 \
+    libice6 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "https://download.blender.org/release/Blender4.5/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
-    -o /tmp/blender.tar.xz \
-    && tar -xJf /tmp/blender.tar.xz -C /opt \
-    && rm /tmp/blender.tar.xz
+USER $MAMBA_USER
 
-# StepForge provides STEP parsing, tessellation and assembly transforms.
-RUN git clone --depth 1 https://github.com/RandomLambda/StepForge.git /opt/stepforge
+# Install FreeCAD and missing Python dependency
+RUN micromamba install -y -n base \
+    -c conda-forge \
+    freecad \
+    defusedxml \
+    && micromamba clean --all --yes
 
-WORKDIR /workspace
-COPY scripts/metadata.py /workspace/metadata.py
-COPY scripts/generate_step_dataset.py /workspace/generate_step_dataset.py
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Install Fasteners Workbench
+RUN mkdir -p \
+    /home/mambauser/.local/share/FreeCAD/Mod \
+    && git clone --depth 1 \
+    https://github.com/shaise/FreeCAD_FastenersWB.git \
+    /home/mambauser/.local/share/FreeCAD/Mod/Fasteners
 
-ENTRYPOINT ["/entrypoint.sh"]
+WORKDIR /app
+
+COPY --chown=mambauser:mambauser scripts/ /app/scripts/
+COPY --chown=mambauser:mambauser run.sh /app/run.sh
+
+# Fix Windows line endings
+RUN sed -i 's/\r$//' /app/run.sh \
+    && chmod +x /app/run.sh
+
+USER root
+
+RUN mkdir -p /data/input /data/output \
+    && chown -R mambauser:mambauser /data
+
+USER mambauser
+
+ENV INPUT_CSV=/data/input/fasteners.csv
+ENV OUTPUT_DIR=/data/output
+ENV QTWEBENGINE_DISABLE_SANDBOX=1
+
+CMD ["bash", "/app/run.sh"]

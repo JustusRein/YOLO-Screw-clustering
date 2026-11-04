@@ -1,0 +1,6 @@
+id,fastener_type,diameter,length_mm,screw_type,tool_size,thread_size,thread_pitch,screw_length,step_file,stl_file,fcstd_file,status
+001,ISO4017,M6,20,hex_head,SW10,M6,P1.0,L20,001_ISO4017_M6_20.step,001_ISO4017_M6_20.stl,001_ISO4017_M6_20.FCStd,success
+002,ISO4017,M8,30,hex_head,SW13,M8,P1.25,L30,002_ISO4017_M8_30.step,002_ISO4017_M8_30.stl,002_ISO4017_M8_30.FCStd,success
+003,ISO4762,M6,20,cylinder_head,HEX5,M6,P1.0,L20,003_ISO4762_M6_20.step,003_ISO4762_M6_20.stl,003_ISO4762_M6_20.FCStd,success
+004,ISO4762,M8,30,cylinder_head,HEX6,M8,P1.25,L30,004_ISO4762_M8_30.step,004_ISO4762_M8_30.stl,004_ISO4762_M8_30.FCStd,success
+005,ISO7046,M4,12,countersunk,PH2,M4,P0.7,L12,005_ISO7046_M4_12.step,005_ISO7046_M4_12.stl,005_ISO7046_M4_12.FCStd,success
