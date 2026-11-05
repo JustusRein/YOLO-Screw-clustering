@@ -1,4 +1,17 @@
+
 # -*- coding: utf-8 -*-
+"""
+FreeCAD Fastener Generator
+Generates STL, STEP and FCStd files from fasteners.csv.
+
+Expected CSV columns:
+    id, fastener_type, diameter
+
+Optional columns:
+    length_mm, part_category, part_type, screw_type,
+    thread_type, tool_size, thread_size, thread_pitch,
+    screw_length
+"""
 
 import FreeCAD as App
 import Part
@@ -7,6 +20,8 @@ import csv
 import os
 import traceback
 import re
+import sys
+import time
 
 import FastenersCmd
 
@@ -16,31 +31,23 @@ import FastenersCmd
 # ============================================================
 
 INPUT_CSV = "/data/input/fasteners.csv"
-
 OUTPUT_DIR = "/data/output"
 
 STL_DIR = os.path.join(OUTPUT_DIR, "stl")
 STEP_DIR = os.path.join(OUTPUT_DIR, "step")
 FCSTD_DIR = os.path.join(OUTPUT_DIR, "fcstd")
 
-METADATA_FILE = os.path.join(
-    OUTPUT_DIR,
-    "generated_metadata.csv"
-)
-
-LOG_FILE = os.path.join(
-    OUTPUT_DIR,
-    "generation_log.txt"
-)
+METADATA_FILE = os.path.join(OUTPUT_DIR, "generated_metadata.csv")
+LOG_FILE = os.path.join(OUTPUT_DIR, "generation_log.txt")
 
 THREAD_ENABLED = False
-
-# The generator uses simple threads by default.
-# This keeps the CAD generation and STL export relatively fast.
 
 EXPORT_STL = True
 EXPORT_STEP = True
 SAVE_FCSTD = True
+
+# FreeCAD recomputation timeout is not implemented here.
+# All geometry operations are performed sequentially.
 
 
 # ============================================================
@@ -48,36 +55,50 @@ SAVE_FCSTD = True
 # ============================================================
 
 SUPPORTED_TYPES = {
-
-    # Screws
     "ISO4017": "screw",
     "ISO4762": "screw",
     "ISO7046": "screw",
     "ISO7045": "screw",
 
-    # Nuts
     "ISO4032": "nut",
     "DIN985": "nut",
     "DIN315": "nut",
 
-    # Washers
     "ISO7089": "washer",
     "ISO7092": "washer",
     "ISO7093-1": "washer",
 }
 
+METADATA_FIELDS = [
+    "id",
+    "filename",
+    "stl_file",
+    "part_category",
+    "part_type",
+    "standard",
+    "fastener_type",
+    "screw_type",
+    "diameter",
+    "length_mm",
+    "thread_type",
+    "tool_size",
+    "thread_size",
+    "thread_pitch",
+    "screw_length",
+    "generation_status",
+]
+
 
 # ============================================================
-# DIRECTORY SETUP
+# INITIALIZATION
 # ============================================================
 
-for directory in [
-    OUTPUT_DIR,
-    STL_DIR,
-    STEP_DIR,
-    FCSTD_DIR
-]:
+for directory in (OUTPUT_DIR, STL_DIR, STEP_DIR, FCSTD_DIR):
     os.makedirs(directory, exist_ok=True)
+
+# Start a fresh log for each run.
+with open(LOG_FILE, "w", encoding="utf-8") as handle:
+    handle.write("FreeCAD Fastener Generator\n")
 
 
 # ============================================================
@@ -85,18 +106,12 @@ for directory in [
 # ============================================================
 
 def log(message):
-
     message = str(message)
+    print("[FASTENER-GENERATOR] " + message, flush=True)
 
-    print(message)
-
-    with open(
-        LOG_FILE,
-        "a",
-        encoding="utf-8"
-    ) as file:
-
+    with open(LOG_FILE, "a", encoding="utf-8") as file:
         file.write(message + "\n")
+        file.flush()
 
 
 # ============================================================
@@ -104,480 +119,318 @@ def log(message):
 # ============================================================
 
 def safe_filename(value):
-
     value = str(value).strip()
+    value = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value)
+    return value.strip("._") or "unnamed"
 
-    value = re.sub(
-        r"[^a-zA-Z0-9_-]+",
-        "_",
-        value
-    )
 
-    return value.strip("_")
+def get_value(row, key, default=""):
+    value = row.get(key, default)
+    if value is None:
+        return default
+    value = str(value).strip()
+    return value if value else default
+
+
+def validate_file(path, description):
+    if not os.path.isfile(path):
+        raise RuntimeError("{} was not created: {}".format(description, path))
+
+    if os.path.getsize(path) <= 0:
+        raise RuntimeError("{} is empty: {}".format(description, path))
 
 
 def read_csv():
+    if not os.path.isfile(INPUT_CSV):
+        raise FileNotFoundError("Input CSV not found: " + INPUT_CSV)
 
-    if not os.path.exists(INPUT_CSV):
+    with open(INPUT_CSV, "r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
 
-        raise FileNotFoundError(
-            "Input CSV not found: {}".format(INPUT_CSV)
-        )
+        if not reader.fieldnames:
+            raise ValueError("CSV has no header row.")
 
-    rows = []
+        required = {"id", "fastener_type", "diameter"}
+        missing = required.difference(reader.fieldnames)
 
-    with open(
-        INPUT_CSV,
-        "r",
-        encoding="utf-8-sig",
-        newline=""
-    ) as file:
-
-        reader = csv.DictReader(file)
-
-        required_columns = [
-            "id",
-            "fastener_type",
-            "diameter"
-        ]
-
-        for column in required_columns:
-
-            if column not in reader.fieldnames:
-
-                raise ValueError(
-                    "Missing CSV column: {}".format(column)
+        if missing:
+            raise ValueError(
+                "Missing required CSV columns: {}".format(
+                    ", ".join(sorted(missing))
                 )
+            )
 
-        for row in reader:
+        rows = list(reader)
 
-            rows.append(row)
+    if not rows:
+        raise ValueError("CSV contains no fastener entries.")
 
     return rows
 
 
-def get_csv_value(row, key, default=""):
-
-    value = row.get(key, default)
-
-    if value is None:
-        return default
-
-    return str(value).strip()
-
-
 def get_fastener_category(row):
-
-    category = get_csv_value(
-        row,
-        "part_category"
-    ).lower()
+    category = get_value(row, "part_category").lower()
 
     if category:
         return category
 
-    fastener_type = get_csv_value(
-        row,
-        "fastener_type"
-    )
-
-    return SUPPORTED_TYPES.get(
-        fastener_type,
-        "unknown"
-    )
+    fastener_type = get_value(row, "fastener_type")
+    return SUPPORTED_TYPES.get(fastener_type, "unknown")
 
 
 def get_part_type(row):
-
-    part_type = get_csv_value(
-        row,
-        "part_type"
-    )
+    part_type = get_value(row, "part_type")
 
     if part_type:
         return part_type
 
     return safe_filename(
-        get_csv_value(row, "screw_type", "unknown")
+        get_value(row, "screw_type", "unknown")
     ).lower()
 
 
-def get_available_diameters(obj):
-
-    values = obj.getEnumerationsOfProperty(
-        "Diameter"
-    )
-
-    return list(values)
-
-
-def get_available_lengths(obj):
-
-    if not hasattr(obj, "Length"):
-
+def get_enumeration_values(obj, property_name):
+    try:
+        values = obj.getEnumerationsOfProperty(property_name)
+        return list(values or [])
+    except Exception:
         return []
-
-    return list(
-        obj.getEnumerationsOfProperty("Length")
-    )
 
 
 def set_diameter(obj, requested_diameter):
+    requested = str(requested_diameter).strip()
+    available = get_enumeration_values(obj, "Diameter")
 
-    available = get_available_diameters(obj)
+    if not available:
+        raise RuntimeError(
+            "Fasteners object has no available Diameter enumeration."
+        )
 
-    if requested_diameter not in available:
+    # Prefer exact match. Also allow a normalized numeric match:
+    # e.g. CSV "6" against a Workbench value "6mm".
+    candidates = [requested]
 
+    numeric_match = re.match(r"^M?\s*(\d+(?:[.,]\d+)?)\s*mm?$", requested, re.I)
+    if numeric_match:
+        number = numeric_match.group(1).replace(",", ".")
+        candidates.extend([number, "M" + number, number + "mm"])
+
+    selected = None
+
+    for candidate in candidates:
+        if candidate in available:
+            selected = candidate
+            break
+
+    if selected is None:
         raise ValueError(
-            "Diameter {} is not supported. Available: {}".format(
-                requested_diameter,
-                available
+            "Unsupported diameter '{}'. Available values: {}".format(
+                requested, available
             )
         )
 
-    obj.Diameter = requested_diameter
+    obj.Diameter = selected
 
 
 def set_length(obj, requested_length):
-
     if not hasattr(obj, "Length"):
-
         return
 
-    if not requested_length:
+    requested = str(requested_length).strip()
 
-        raise ValueError(
-            "Length is required for this fastener."
-        )
+    if not requested:
+        raise ValueError("Length is required for this fastener.")
 
-    available = get_available_lengths(obj)
+    available = get_enumeration_values(obj, "Length")
 
-    requested_length = str(
-        requested_length
-    ).strip()
-
-    if requested_length in available:
-
-        obj.Length = requested_length
-
+    if requested in available:
+        obj.Length = requested
         return
 
-    if "Custom" not in available:
-
-        raise ValueError(
-            "Length {} is not supported. Available: {}".format(
-                requested_length,
-                available
+    # Some Fasteners Workbench objects expose a Custom length.
+    if "Custom" in available and hasattr(obj, "LengthCustom"):
+        try:
+            obj.Length = "Custom"
+            obj.LengthCustom = App.Units.Quantity(requested + " mm")
+            return
+        except Exception as exc:
+            raise ValueError(
+                "Could not set custom length '{}': {}".format(requested, exc)
             )
+
+    raise ValueError(
+        "Unsupported length '{}'. Available values: {}".format(
+            requested, available
         )
-
-    obj.Length = "Custom"
-
-    obj.LengthCustom = App.Units.Quantity(
-        "{} mm".format(requested_length)
     )
 
 
+def check_shape(obj):
+    if not hasattr(obj, "Shape"):
+        raise RuntimeError("Generated object has no Shape property.")
+
+    shape = obj.Shape
+
+    if shape is None or shape.isNull():
+        raise RuntimeError("Generated shape is empty.")
+
+    if not shape.isValid():
+        raise RuntimeError("Generated shape is invalid.")
+
+    if len(shape.Solids) == 0:
+        raise RuntimeError("Generated shape contains no solids.")
+
+
+def metadata_base(row):
+    fastener_type = get_value(row, "fastener_type")
+    return {
+        "id": get_value(row, "id"),
+        "filename": "",
+        "stl_file": "",
+        "part_category": get_fastener_category(row),
+        "part_type": get_part_type(row),
+        "standard": get_value(row, "standard", fastener_type),
+        "fastener_type": fastener_type,
+        "screw_type": get_value(row, "screw_type", get_part_type(row)),
+        "diameter": get_value(row, "diameter"),
+        "length_mm": get_value(row, "length_mm"),
+        "thread_type": get_value(row, "thread_type", "simple"),
+        "tool_size": get_value(row, "tool_size"),
+        "thread_size": get_value(row, "thread_size", get_value(row, "diameter")),
+        "thread_pitch": get_value(row, "thread_pitch"),
+        "screw_length": get_value(row, "screw_length"),
+        "generation_status": "failed",
+    }
+
+
 # ============================================================
-# CREATE FASTENER
+# FASTENER CREATION
 # ============================================================
 
 def create_fastener(row):
+    metadata = metadata_base(row)
 
-    fastener_id = get_csv_value(
-        row,
-        "id"
-    )
-
-    fastener_type = get_csv_value(
-        row,
-        "fastener_type"
-    )
-
-    diameter = get_csv_value(
-        row,
-        "diameter"
-    )
-
-    length = get_csv_value(
-        row,
-        "length_mm"
-    )
-
-    category = get_fastener_category(row)
-
-    part_type = get_part_type(row)
+    fastener_id = metadata["id"]
+    fastener_type = metadata["fastener_type"]
+    category = metadata["part_category"]
+    diameter = metadata["diameter"]
+    length = metadata["length_mm"]
+    part_type = metadata["part_type"]
 
     if fastener_type not in SUPPORTED_TYPES:
+        raise ValueError("Unsupported fastener type: " + fastener_type)
 
+    expected_category = SUPPORTED_TYPES[fastener_type]
+
+    if category != expected_category:
         raise ValueError(
-            "Unsupported fastener type: {}".format(
-                fastener_type
+            "{} is registered as '{}', not '{}'.".format(
+                fastener_type, expected_category, category
             )
         )
 
-    if SUPPORTED_TYPES[fastener_type] != category:
+    if category not in ("screw", "nut", "washer"):
+        raise ValueError("Unsupported category: " + category)
 
-        raise ValueError(
-            "Category mismatch: {} is registered as {}, not {}".format(
-                fastener_type,
-                SUPPORTED_TYPES[fastener_type],
-                category
-            )
+    if not diameter:
+        raise ValueError("Diameter is missing.")
+
+    name = safe_filename(
+        "{}_{}_{}_{}".format(
+            fastener_id, fastener_type, part_type, diameter
         )
-
-    if category not in [
-        "screw",
-        "nut",
-        "washer"
-    ]:
-
-        raise ValueError(
-            "Unsupported category: {}".format(category)
-        )
-
-    name = "{}_{}_{}".format(
-        fastener_id,
-        part_type,
-        diameter
+        + ("_L" + length if length else "")
     )
-
-    if length:
-        name += "_L{}".format(length)
-
-    name = safe_filename(name)
 
     log("")
     log("=" * 60)
-    log("Generating: {}".format(name))
-    log("Category: {}".format(category))
-    log("Standard: {}".format(fastener_type))
-    log("Diameter: {}".format(diameter))
-    log("Length: {}".format(length or "N/A"))
+    log("Generating: " + name)
+    log("Category: " + category)
+    log("Standard: " + fastener_type)
+    log("Diameter: " + diameter)
+    log("Length: " + (length or "N/A"))
 
-    # --------------------------------------------------------
-    # Create FreeCAD document
-    # --------------------------------------------------------
-
-    doc = App.newDocument(name)
+    doc = None
 
     try:
+        doc = App.newDocument(name)
 
-        obj = doc.addObject(
-            "Part::FeaturePython",
-            "Fastener"
-        )
+        obj = doc.addObject("Part::FeaturePython", "Fastener")
 
-        # The same generic Fasteners Workbench object class
-        # is used for screws, nuts and washers.
-        #
-        # The standard identifier determines the geometry
-        # and the available parameters.
+        # The Fasteners Workbench constructor is version-dependent.
+        # This is the constructor used by the original project.
+        FastenersCmd.FSScrewObject(obj, fastener_type, None)
 
-        FastenersCmd.FSScrewObject(
-            obj,
-            fastener_type,
-            None
-        )
-
-        # ----------------------------------------------------
-        # Diameter
-        # ----------------------------------------------------
-
-        set_diameter(
-            obj,
-            diameter
-        )
-
-        # ----------------------------------------------------
-        # Length
-        # Only screws have a length parameter in this setup.
-        # ----------------------------------------------------
+        set_diameter(obj, diameter)
 
         if category == "screw":
-
-            set_length(
-                obj,
-                length
-            )
-
-        # ----------------------------------------------------
-        # Thread
-        # ----------------------------------------------------
+            set_length(obj, length)
 
         if hasattr(obj, "Thread"):
-
             obj.Thread = THREAD_ENABLED
-
-        # ----------------------------------------------------
-        # Label
-        # ----------------------------------------------------
 
         obj.Label = name
 
-        # ----------------------------------------------------
-        # Recompute geometry
-        # ----------------------------------------------------
-
         doc.recompute()
+        check_shape(obj)
 
-        if not hasattr(obj, "Shape"):
-
-            raise RuntimeError(
-                "Generated object has no Shape property."
-            )
-
-        if obj.Shape.isNull():
-
-            raise RuntimeError(
-                "Generated shape is empty."
-            )
-
-        if not obj.Shape.isValid():
-
-            raise RuntimeError(
-                "Generated shape is invalid."
-            )
-
-        # ----------------------------------------------------
         # Export STL
-        # ----------------------------------------------------
-
         stl_filename = name + ".stl"
-
-        stl_path = os.path.join(
-            STL_DIR,
-            stl_filename
-        )
+        stl_path = os.path.join(STL_DIR, stl_filename)
 
         if EXPORT_STL:
+            Mesh.export([obj], stl_path)
+            validate_file(stl_path, "STL")
 
-            Mesh.export(
-                [obj],
-                stl_path
-            )
+            metadata["filename"] = stl_filename
+            metadata["stl_file"] = stl_filename
+            log("STL exported: " + stl_path)
 
-            if not os.path.exists(stl_path):
-
-                raise RuntimeError(
-                    "STL export failed."
-                )
-
-            log("STL exported: {}".format(stl_path))
-
-        # ----------------------------------------------------
         # Export STEP
-        # ----------------------------------------------------
-
-        step_filename = name + ".step"
-
-        step_path = os.path.join(
-            STEP_DIR,
-            step_filename
-        )
+        step_path = os.path.join(STEP_DIR, name + ".step")
 
         if EXPORT_STEP:
+            Part.export([obj], step_path)
+            validate_file(step_path, "STEP")
+            log("STEP exported: " + step_path)
 
-            Part.export(
-                [obj],
-                step_path
-            )
-
-            if not os.path.exists(step_path):
-
-                raise RuntimeError(
-                    "STEP export failed."
-                )
-
-            log("STEP exported: {}".format(step_path))
-
-        # ----------------------------------------------------
-        # Save FCStd
-        # ----------------------------------------------------
-
-        fcstd_filename = name + ".FCStd"
-
-        fcstd_path = os.path.join(
-            FCSTD_DIR,
-            fcstd_filename
-        )
+        # Save FreeCAD document
+        fcstd_path = os.path.join(FCSTD_DIR, name + ".FCStd")
 
         if SAVE_FCSTD:
-
             doc.recompute()
+            doc.saveAs(fcstd_path)
+            validate_file(fcstd_path, "FCStd")
+            log("FCStd saved: " + fcstd_path)
 
-            doc.saveAs(
-                fcstd_path
-            )
-
-            log("FCStd saved: {}".format(fcstd_path))
-
-        # ----------------------------------------------------
-        # Metadata
-        # ----------------------------------------------------
-
-        metadata = {
-
-            "id": fastener_id,
-
-            "filename": stl_filename,
-
-            "stl_file": stl_filename,
-
-            "part_category": category,
-
-            "part_type": part_type,
-
-            "standard": fastener_type,
-
-            "fastener_type": fastener_type,
-
-            "screw_type": get_csv_value(
-                row,
-                "screw_type",
-                part_type
-            ),
-
-            "diameter": diameter,
-
-            "length_mm": length,
-
-            "thread_type": get_csv_value(
-                row,
-                "thread_type",
-                "simple"
-            ),
-
-            "tool_size": get_csv_value(
-                row,
-                "tool_size"
-            ),
-
-            "thread_size": get_csv_value(
-                row,
-                "thread_size",
-                diameter
-            ),
-
-            "thread_pitch": get_csv_value(
-                row,
-                "thread_pitch"
-            ),
-
-            "screw_length": get_csv_value(
-                row,
-                "screw_length"
-            ),
-
-            "generation_status": "success"
-
-        }
-
+        metadata["generation_status"] = "success"
         return metadata
 
     finally:
+        if doc is not None:
+            try:
+                App.closeDocument(doc.Name)
+            except Exception as exc:
+                log("WARNING: Could not close document: {}".format(exc))
 
-        App.closeDocument(doc.Name)
+
+# ============================================================
+# METADATA OUTPUT
+# ============================================================
+
+def write_metadata(rows):
+    temp_path = METADATA_FILE + ".tmp"
+
+    with open(temp_path, "w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=METADATA_FIELDS,
+            extrasaction="ignore"
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+    os.replace(temp_path, METADATA_FILE)
 
 
 # ============================================================
@@ -585,174 +438,72 @@ def create_fastener(row):
 # ============================================================
 
 def main():
-
     log("")
     log("=" * 60)
     log("FREECAD FASTENER GENERATOR")
+    log("FreeCAD version: {}".format(App.Version()))
+    log("FastenersCmd: {}".format(getattr(FastenersCmd, "__file__", "unknown")))
     log("=" * 60)
 
     rows = read_csv()
-
-    log(
-        "Input entries: {}".format(len(rows))
-    )
+    log("Input entries: {}".format(len(rows)))
 
     metadata_rows = []
-
     successful = 0
     failed = 0
 
-    for row in rows:
+    for index, row in enumerate(rows, start=1):
+        log("Processing entry {}/{}".format(index, len(rows)))
 
         try:
-
             metadata = create_fastener(row)
-
             metadata_rows.append(metadata)
-
             successful += 1
-
-            log(
-                "SUCCESS: {}".format(
-                    metadata["filename"]
-                )
-            )
+            log("SUCCESS: {}".format(metadata["filename"]))
 
         except Exception as error:
-
             failed += 1
+            metadata = metadata_base(row)
+            metadata_rows.append(metadata)
 
-            log(
-                "ERROR for ID {}: {}".format(
-                    get_csv_value(row, "id"),
-                    error
-                )
-            )
+            log("ERROR for ID {}: {}".format(metadata["id"], error))
+            log(traceback.format_exc())
 
-            log(
-                traceback.format_exc()
-            )
-
-            metadata_rows.append({
-
-                "id": get_csv_value(row, "id"),
-
-                "filename": "",
-
-                "stl_file": "",
-
-                "part_category": get_csv_value(
-                    row,
-                    "part_category"
-                ),
-
-                "part_type": get_csv_value(
-                    row,
-                    "part_type"
-                ),
-
-                "standard": get_csv_value(
-                    row,
-                    "standard"
-                ),
-
-                "fastener_type": get_csv_value(
-                    row,
-                    "fastener_type"
-                ),
-
-                "diameter": get_csv_value(
-                    row,
-                    "diameter"
-                ),
-
-                "length_mm": get_csv_value(
-                    row,
-                    "length_mm"
-                ),
-
-                "generation_status": "failed"
-
-            })
-
-    # --------------------------------------------------------
-    # Write metadata CSV
-    # --------------------------------------------------------
-
-    fieldnames = [
-
-        "id",
-        "filename",
-        "stl_file",
-
-        "part_category",
-        "part_type",
-
-        "standard",
-        "fastener_type",
-
-        "screw_type",
-
-        "diameter",
-        "length_mm",
-
-        "thread_type",
-        "tool_size",
-        "thread_size",
-        "thread_pitch",
-        "screw_length",
-
-        "generation_status"
-
-    ]
-
-    with open(
-        METADATA_FILE,
-        "w",
-        encoding="utf-8",
-        newline=""
-    ) as file:
-
-        writer = csv.DictWriter(
-            file,
-            fieldnames=fieldnames,
-            extrasaction="ignore"
-        )
-
-        writer.writeheader()
-
-        writer.writerows(metadata_rows)
-
-    # --------------------------------------------------------
-    # Summary
-    # --------------------------------------------------------
+    write_metadata(metadata_rows)
 
     log("")
     log("=" * 60)
     log("GENERATION FINISHED")
+    log("Successful: {}".format(successful))
+    log("Failed: {}".format(failed))
+    log("Total: {}".format(len(rows)))
+    log("Metadata: {}".format(METADATA_FILE))
     log("=" * 60)
 
-    log(
-        "Successful: {}".format(successful)
-    )
-
-    log(
-        "Failed: {}".format(failed)
-    )
-
-    log(
-        "Total: {}".format(len(rows))
-    )
-
-    log(
-        "Metadata: {}".format(METADATA_FILE)
-    )
-
-    log("=" * 60)
+    # Return a failing exit code so Docker and the pipeline can detect errors.
+    if failed:
+        log("One or more fasteners failed. Exiting with error.")
+        raise RuntimeError(
+            "{} of {} fasteners failed.".format(failed, len(rows))
+        )
 
 
 # ============================================================
 # RUN
 # ============================================================
 
-main()
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log(f"FATAL ERROR: {e}")
+        traceback.print_exc()
+        raise
+    finally:
+        log("Closing FreeCAD...")
+
+        try:
+            import FreeCADGui as Gui
+            Gui.getMainWindow().close()
+        except Exception:
+            pass

@@ -3,27 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-
     container_name: freecad-distractor-generator
-
     working_dir: /app
-
     environment:
       INPUT_CSV: /data/input/distractors.csv
       OUTPUT_DIR: /data/output
-
-      RANDOM_SEED: "42"
-
-      # STEP-Dateien zusätzlich zu STL exportieren
-      EXPORT_STEP: "1"
-
-      # FCStd-Dateien optional exportieren
-      EXPORT_FCSTD: "0"
-
+      RANDOM_SEED: ${RANDOM_SEED:-42}
+      EXPORT_STEP: ${EXPORT_STEP:-1}
+      EXPORT_FCSTD: ${EXPORT_FCSTD:-0}
     volumes:
       - ./input:/data/input
       - ./output:/data/output
-
-    command:
-      - bash
-      - /app/run.sh

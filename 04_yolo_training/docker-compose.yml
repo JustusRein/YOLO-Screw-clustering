@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
 
     container_name: yolo-screw-trainer
 
@@ -25,36 +27,36 @@ services:
 
       WEIGHTS: /workspace/output/weights/best.pt
 
-      MODEL: yolo11n.pt
+      MODEL: ${MODEL:-yolo11n.pt}
 
-      EPOCHS: "100"
+      EPOCHS: ${EPOCHS:-100}
 
-      # Intel RealSense D405 RGB resolution
-      IMAGE_SIZE: "1280"
+      # Reference RGB camera resolution
+      IMAGE_SIZE: ${IMAGE_SIZE:-1280}
       RES_X: "1280"
       RES_Y: "720"
 
-      # Preserve 16:9 aspect ratio during training
+      # Preserve the 16:9 aspect ratio during training
       RECTANGULAR_TRAINING: "true"
 
-      BATCH_SIZE: "2"
+      BATCH_SIZE: ${BATCH_SIZE:-2}
 
-      WORKERS: "2"
+      WORKERS: ${WORKERS:-2}
 
-      LEARNING_RATE: "0.001"
+      LEARNING_RATE: ${LEARNING_RATE:-0.001}
 
-      PATIENCE: "30"
+      PATIENCE: ${PATIENCE:-30}
 
-      RANDOM_SEED: "42"
+      RANDOM_SEED: ${RANDOM_SEED:-42}
 
-      DEVICE: cpu
+      DEVICE: ${DEVICE:-cpu}
 
       EXPECTED_WIDTH: "1280"
       EXPECTED_HEIGHT: "720"
 
       # Prediction settings
-      CONFIDENCE: "0.25"
-      IOU_THRESHOLD: "0.45"
+      CONFIDENCE: ${CONFIDENCE:-0.25}
+      IOU_THRESHOLD: ${IOU_THRESHOLD:-0.45}
 
     shm_size: "4gb"
 

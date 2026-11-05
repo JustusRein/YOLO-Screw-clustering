@@ -13,10 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU version of PyTorch
+# CPU wheels are the safe default. Override TORCH_INDEX_URL for a
+# CUDA-compatible PyTorch wheel index on supported NVIDIA hosts.
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir \
     torch torchvision \
-    --index-url https://download.pytorch.org/whl/cpu
+    --index-url ${TORCH_INDEX_URL}
 
 # YOLO framework
 RUN pip install --no-cache-dir ultralytics

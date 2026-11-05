@@ -1,17 +1,13 @@
 services:
   freecad-generator:
-    build: .
-
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: freecad-fastener-generator
-
+    working_dir: /app
     environment:
       INPUT_CSV: /data/input/fasteners.csv
       OUTPUT_DIR: /data/output
-
     volumes:
       - ./input:/data/input
       - ./output:/data/output
-
-    working_dir: /app
-
-    command: bash /app/run.sh

@@ -8,18 +8,18 @@ services:
     working_dir: /workspace
 
     volumes:
-      # Gelabelte Zielobjekte
+      # Labeled target objects
       - ../01_fastener_generation/output/stl:/data/input/stl:ro
       - ../01_fastener_generation/output/generated_metadata.csv:/data/input/generated_metadata.csv:ro
 
-      # Unlabeled Distraktoren
+      # Unlabeled distractor objects
       - ../02_distractor_generation/output/stl:/data/input/distractors:ro
 
-      # Skripte und Ergebnisse
+      # Scripts and generated results
       - ./scripts:/workspace/scripts:ro
       - ./output:/workspace/output
       
-      # hintergrundbilder
+      # Optional background images
       - ./input/backgrounds:/data/input/backgrounds:ro
 
     environment:
@@ -28,34 +28,34 @@ services:
       DISTRACTOR_DIR: /data/input/distractors
       OUTPUT_DIR: /workspace/output
       BACKGROUND_DIR: /data/input/backgrounds
-      EEVEE_SAMPLES: "16"
+      EEVEE_SAMPLES: ${EEVEE_SAMPLES:-16}
 
-      # Anzahl erzeugter Szenen
-      SCENE_COUNT: "1000"
+      # Number of scenes to render
+      SCENE_COUNT: ${SCENE_COUNT:-1000}
 
-      # Anzahl gelabelter Fastener pro Bild
-      TARGET_MIN: "1"
-      TARGET_MAX: "5"
+      # Number of labeled fasteners per image
+      TARGET_MIN: ${TARGET_MIN:-1}
+      TARGET_MAX: ${TARGET_MAX:-5}
 
-      # Anzahl unlabeled Distraktoren pro Bild
-      DISTRACTOR_MIN: "3"
-      DISTRACTOR_MAX: "10"
+      # Number of unlabeled distractors per image
+      DISTRACTOR_MIN: ${DISTRACTOR_MIN:-3}
+      DISTRACTOR_MAX: ${DISTRACTOR_MAX:-10}
 
-      # Anteil der Bilder ohne Schrauben/Muttern
-      NEGATIVE_SCENE_PROBABILITY: "0.05"
+      # Probability of a negative scene without target fasteners
+      NEGATIVE_SCENE_PROBABILITY: ${NEGATIVE_SCENE_PROBABILITY:-0.05}
 
-      # Abmessungen der virtuellen Arbeitsfläche in mm
-      TABLE_SIZE: "220"
+      # Virtual work surface size in millimeters
+      TABLE_SIZE: ${TABLE_SIZE:-220}
 
-      # Bildauflösung
-      RES_X: "1280"
-      RES_Y: "720"
-      RESOLUTION_PERCENTAGE: "100"
+      # Render resolution
+      RES_X: ${RES_X:-1280}
+      RES_Y: ${RES_Y:-720}
+      RESOLUTION_PERCENTAGE: ${RESOLUTION_PERCENTAGE:-100}
 
-      # Zufallsseed
-      RANDOM_SEED: "42"
+      # Random seed
+      RANDOM_SEED: ${RANDOM_SEED:-42}
 
-      # YOLO-Klasse aus der Fastener-Metadatei
+      # Metadata attribute used as the YOLO class
       CLASS_ATTRIBUTE: "screw_type"
 
     entrypoint:
